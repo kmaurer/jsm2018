@@ -13,8 +13,18 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-```
 
+# libraries
+library(iqbin)
+library(FNN)
+library(tidyverse)
+library(stringr)
+library(randomForest)
+library(RANN)
+library(mvtnorm)
+library(gridExtra)
+library(xtable)
+```
 
 # Introduction
 ## Motivation
@@ -24,8 +34,10 @@ $k$ Nearest-Neighbors (KNN):
 - Provides localized non-parametric estimation over feature space
 - Computationally expensive distance calculations and sorting
 - Efficient algorithms for approximate nearest neightborhoods (AKNN)
+- kd-tree AKNN (Arya et al., 1998) 
+- cover-tree AKNN (Beygelzimer et al., 2006)
 
-\vspace{.5cm}
+\vspace{.25cm}
 
 Iterative Quantile Nearest-Neighbors (IQNN):
 
@@ -34,10 +46,80 @@ Iterative Quantile Nearest-Neighbors (IQNN):
 - Partition with $k$ training points per partition
 - Use iterative algorithm of quantile-based univariate partitions
 
-## Slide with Plot
+## IQNN - Simple Demonstration
 
-```{r pressure}
-plot(pressure)
+```{r p1, fig.align='center',fig.width=4, fig.height=3}
+set.seed(12345)
+nsim=90
+simbins <- 3
+color_steps <- c(-4,-2,0,2,4)
+mydata <- data.frame(rmvnorm(nsim, mean=c(0,0), sigma=matrix(c(1,.9,.9,1),byrow=TRUE, nrow=2)))
+mydata$Y <- mydata$X1 + mydata$X2 + rnorm(nsim)
+point_color <- "black"
+line_color <- "black"
+mytheme <- theme_bw() + 
+  theme(legend.position = "right",panel.grid.minor = element_blank(),
+        panel.border = element_blank(), legend.text.align = 1, legend.title.align = .25)
+
+mybins <- iqbin(data=mydata, bin_cols=c("X1","X2"),nbins=c(simbins, simbins), output="both")
+X1_bounds <- unique(c(mybins$bin_def$bin_bounds[,1],mybins$bin_def$bin_bounds[,2]))
+
+# plot with X1 breaks
+ggplot()+
+  geom_point(aes(x=X1,y=X2, color=Y), data=mydata, size=1) +
+  scale_color_gradient2("Y",low="#08519c",mid="gray80",high="#a50f15",
+                        midpoint=0,breaks=color_steps,
+                        limits=c(-max(abs(mydata$Y)),max(abs(mydata$Y))))+
+  labs(x=expression(X[1]),y=expression(X[2]))+
+  mytheme +
+  annotate(geom="text",x=-1.5,y=1.5,label="n=90", size=5)
+```
+
+## IQNN - Simple Demonstration
+
+```{r p2, fig.align='center',fig.width=4, fig.height=3}
+ggplot()+
+  geom_point(aes(x=X1,y=X2, color=Y), data=mydata, size=1) +
+  geom_vline(xintercept = X1_bounds, size=.6, color=line_color)+
+  scale_color_gradient2("Y",low="#08519c",mid="gray80",high="#a50f15",
+                        midpoint=0,breaks=color_steps,
+                        limits=c(-max(abs(mydata$Y)),max(abs(mydata$Y))))+
+  labs(x=expression(X[1]),y=expression(X[2]))+
+  mytheme +
+  annotate(geom="text",x=-1.5,y=1.5,label="n[b]==30", size=5, parse=T)
+```
+
+## IQNN - Simple Demonstration
+
+```{r p3, fig.align='center',fig.width=4, fig.height=3}
+ggplot()+
+  geom_point(aes(x = X1, y = X2,color=Y), data = mydata, size=1)+  
+  geom_rect(aes(xmin = X1, xmax = X2, ymin = X3, ymax = X4), 
+            data = data.frame(mybins$bin_def$bin_bounds),
+            color =line_color, fill = NA, size=.6) +
+  scale_color_gradient2("Y",low="#08519c",mid="gray80",high="#a50f15",
+                        midpoint=0,breaks=color_steps,
+                        limits=c(-max(abs(mydata$Y)),max(abs(mydata$Y))))+
+  labs(x=expression(X[1]),y=expression(X[2]))+
+  mytheme +
+  annotate(geom="text",x=-1.5,y=1.5,label="n[b]==10", size=5, parse=T)
+```
+
+## IQNN - Simple Demonstration
+
+```{r p4, fig.align='center',fig.width=4, fig.height=3}
+# IQNN regression plot
+myiqnn <- iqnn(mydata,y="Y", mod_type = "reg", bin_cols=c("X1","X2"),nbins=c(simbins,simbins))
+ggplot()+
+  geom_rect(aes(xmin = X1, xmax = X2, ymin = X3, ymax = X4, fill=pred), 
+            data = data.frame(mybins$bin_def$bin_bounds,pred=myiqnn$bin_stats$pred),
+            color =line_color, size=.6) +
+  scale_fill_gradient2(expression(hat(Y)),low="#08519c",mid="gray80",high="#a50f15",
+                       midpoint=0,breaks=color_steps,
+                       limits=c(-max(abs(mydata$Y)),max(abs(mydata$Y))))+
+  labs(x=expression(X[1]),y=expression(X[2]))+
+  mytheme +
+  annotate(geom="text",x=-1.5,y=1.5,label="n[b]==10", size=5, parse=T)
 ```
 
 
