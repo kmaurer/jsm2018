@@ -1,0 +1,48 @@
+---
+title: "Iterative Quantiles Nearest-Neighbors"
+author: "Karsten Maurer" 
+institute: "Miami University"
+date: "July 30, 2018"
+output:
+  beamer_presentation:
+    theme: "Madrid"
+    colortheme: "beaver"
+    toc: true
+    slide_level: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+# Introduction
+## Motivation
+
+$k$ Nearest-Neighbors (KNN): 
+
+- Provides localized non-parametric estimation over feature space
+- Computationally expensive distance calculations and sorting
+- Efficient algorithms for approximate nearest neightborhoods (AKNN)
+
+\vspace{.5cm}
+
+Iterative Quantile Nearest-Neighbors (IQNN):
+
+- Can we make neighborhoods with binned-partitions of feature space?
+- Checking for points in intervals fast 
+- Partition with $k$ training points per partition
+- Use iterative algorithm of quantile-based univariate partitions
+
+## Slide with Plot
+
+```{r pressure}
+plot(pressure)
+```
+
+
+## Slide with R Output
+
+```{r cars, echo = TRUE}
+summary(cars)
+```
