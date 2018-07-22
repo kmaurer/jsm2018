@@ -24,6 +24,10 @@ library(RANN)
 library(mvtnorm)
 library(gridExtra)
 library(xtable)
+
+# Load all data
+load(file="./sim_all.Rdata")
+load(file="./sim_times_agg.Rdata")
 ```
 
 # Introduction
@@ -175,11 +179,236 @@ Computational Efficiency: \textit{Timing study}
 - Speed of identifying neighboring points with IQNN vs AKNN methods
 
 
-Predictive Accuracy: \textit{Timing study}
+Predictive Accuracy: \textit{Empirical Comparison}
 
 - Test with real data sets: 10 regression problems, 10 classification problems
 - Data Repos: UCI (\url{archive.ics.uci.edu}) and KEEL (\url{sci2s.ugr.es/keel})
-- test with various neighborhood sizes: $k$=$2^0$,$2^4$,...,$2^{14}$
-- Speed of pre-processing with IQNN vs AKNN methods
-- Speed of identifying neighboring points with IQNN vs AKNN methods
+- Accuracy assessed using 10-fold CV with tuned models from each case
 
+## Timing Study
+
+```{r timing_plot, fig.align='center',fig.width=9.5, fig.height=5.3, out.width='.99\\linewidth', warning=FALSE}
+sim_fit_times <- sim_times_agg %>%
+  select(-ends_with("predtime")) %>%
+  gather(key="type",value="time",knn_brute_fittime:iqnn_fittime) %>%
+  mutate(stage = "fitting",
+         type = str_sub(type,1,-9),
+         plabel = factor(paste0("p == 2^",log2(p)), levels=paste0("p == 2^",sort(unique(log2(sim_times_agg$p))))),
+         klabel = factor(paste0("k == 2^",log2(k)), levels=paste0("k == 2^",sort(unique(log2(sim_times_agg$k))))) )
+
+# pull out prediction times and move from wide to tall
+sim_pred_times <- sim_times_agg %>%
+  select(-ends_with("fittime")) %>%
+  gather(key="type",value="time",knn_brute_predtime:iqnn_predtime) %>%
+  mutate(stage = "predicting",
+         type = str_sub(type,1,-10),
+         plabel = factor(paste0("p == 2^",log2(p)), levels=paste0("p == 2^",sort(unique(log2(sim_times_agg$p))))),
+         klabel = factor(paste0("k == 2^",log2(k)), levels=paste0("k == 2^",sort(unique(log2(sim_times_agg$k))))),
+         dlabel = factor(paste0("delta == 2^",log2(d)), levels=paste0("delta == 2^",sort(unique(log2(sim_times_agg$d))))) )
+
+
+# define color palette
+my_colors <- RColorBrewer::brewer.pal(n=4,name="Set1")[c(1,4,2,3)]
+
+# combine and define transformation of strings to clarify labels
+combined_times <- rbind(data.frame(sim_fit_times,dlabel=NA),
+                        sim_pred_times)
+
+combined_times$stage_pretty <- factor(ifelse(combined_times$stage=="fitting","Preprocessing","Prediction"),
+                                      levels=c("Preprocessing","Prediction"))
+combined_times$type_pretty <- factor(combined_times$type, labels=c("IQNN   ","KNN-brute   ","AKNN-cover   ", "AKNN-kd   "))
+
+### lineplot of times with overlayed points (allows for better transition to grayscale)
+ggplot()+
+  geom_hline(yintercept = 0)+
+  # geom_vline(xintercept = 2^14)+
+  geom_line(aes(x=n, y=time, color=type_pretty, linetype=type_pretty),
+            size=.6,data=combined_times) +
+  geom_point(aes(x=n, y=time, color=type_pretty, shape=type_pretty),
+             size=2.5,data=combined_times) +
+  # geom_text(aes(x=n, y=time, label=dlabel),
+  #           data=filter(sim_pred_times, type=="iqnn"), parse=TRUE) +
+  facet_grid(stage_pretty~klabel, labeller = label_parsed)+
+  scale_y_continuous("Time in log(mins)", trans="log", breaks=c(0.0001,.001,.01,.1,1,10,100)) +
+  scale_x_continuous(trans="log2", breaks=2^seq(4,20,by=4), 
+                     labels=parse(text=paste0("2^",seq(4,20,by=4)))) +
+  # scale_color_brewer(palette="Set1")+
+  # scale_linetype_manual("Neighborhood Algorithm:  ",values=c("solid","dotted","twodash","dotdash"))+
+  scale_linetype_manual("Neighborhood Algorithm:  ",values=c(1,1,1,1))+
+  scale_shape_manual("Neighborhood Algorithm:  ", values=c(2,5,0,1))+
+  scale_color_manual("Neighborhood Algorithm:  ", values=my_colors)+
+  labs(x="Training Size (n)")+
+  theme_bw()+
+  theme(legend.position = "bottom")
+```
+
+## Regression Accuracy
+```{r reg_accuracy, fig.align='center',fig.width=9.5, fig.height=5.3, out.width='.99\\linewidth', warning=FALSE}
+load(file="./tuned_regression_testing.Rdata") 
+ 
+#Setting order of data sets
+iqnn_reg_rmse <- filter(results_reg, type=="iqnn") %>% arrange(desc(rmse))
+iqnn_rmse_order <- as.character(iqnn_reg_rmse$data_name)
+
+# clean data for plots of RMSE relative to knn as baseline
+#   - separate knn from others for "baseline" layers vs "points" layers in plotting
+reg_plot_data_knn <- results_reg %>%
+  filter(type == "knn - brute") %>%
+  mutate(data_name = factor(data_name,levels=iqnn_rmse_order),
+         x=as.numeric(data_name)-.5,
+         xend=as.numeric(data_name)+.5)
+reg_plot_data_knn$type_pretty <- "KNN-brute"
+
+shiftval=.25
+reg_plot_data <- results_reg %>%
+  filter(type != "knn - brute") %>%
+  mutate(shift = (as.numeric(as.factor(as.character(type)))-2)*shiftval,
+         data_name = factor(data_name,levels=iqnn_rmse_order))
+reg_plot_data$type_pretty <- factor(reg_plot_data$type, labels=c("IQNN   ","AKNN-cover ", "AKNN-kd   ")) 
+
+#!# data labels match CLASSIFIERS!
+x_label_sizes_reg <- as.numeric(sapply(levels(reg_plot_data$data_name), function(x) reg_plot_data$obs[reg_plot_data$data_name==x][1]))
+my_x_ticks_reg <- paste0(levels(reg_plot_data$data_name), "\n n=",x_label_sizes_reg)
+
+
+# plot relative to KNN on raw RMSE scale
+#   - use vertical lines to partition between datasets
+#   - baseline KNN-brute as flat line segment
+#   - consistently offset points for IWNN and AKNN on X, y=accuracy
+#   - scale / theme to match previous plots
+p3 <- ggplot()+
+  geom_vline(xintercept=seq(0.5,10.5,by=1),linetype=2,color="gray25")+
+  geom_segment(aes(x=x, xend=xend,y=rmse,yend=rmse, linetype="KNN-brute"),
+               color=RColorBrewer::brewer.pal(4,"Set1")[4], size=.8, data=reg_plot_data_knn) +
+  geom_point(aes(x=as.numeric(data_name)+shift,y=rmse,color=type_pretty,shape=type_pretty),
+             size=3,data=reg_plot_data)+
+  theme_bw() +
+  scale_linetype_manual("Baseline: ", values=1)+
+  scale_x_continuous("", breaks=1:10,
+                     labels=my_x_ticks_reg,
+                     limits=c(0.5,10.5)) +
+  labs(y="Average RMSE\n (units of std dev)")+
+  scale_color_manual("Model Type: ", values=RColorBrewer::brewer.pal(4,"Set1")[c(1,2,3)])+
+  scale_shape_manual("Model Type: ", values=c(2,0,1))+
+  theme(panel.grid.major.x =element_blank(),
+        panel.grid.minor.x =element_blank(),
+        axis.ticks.x = element_blank(),
+        # panel.border = element_blank(),
+        legend.position = "none")
+
+
+# plot relative to KNN as difference in RMSE from KNN-brute
+#   - use vertical lines to partition between datasets
+#   - baseline at 0 to represent KNN-brute
+#   - consistently offset points for IWNN and AKNN on X, y=accuracy
+#   - scale / theme to match previous plots
+p4 <- ggplot()+
+  geom_segment(aes(x=.5, xend=10.5,y=0,yend=0, linetype="KNN-brute"),size=.8, color=RColorBrewer::brewer.pal(4,"Set1")[4])+
+  geom_vline(xintercept=seq(0.5,10.5,by=1),linetype=2,color="gray25")+
+  geom_point(aes(x=as.numeric(data_name)+shift,y=rmse_diff,color=type_pretty,shape=type_pretty),
+             size=3,data=reg_plot_data)+
+  theme_bw() +
+  scale_x_continuous(" ", breaks=1:10,
+                     labels=my_x_ticks_reg,
+                     limits=c(0.5,10.5)) +
+  labs(y="Difference from KNN-brute\n (units of std dev)")+
+  # scale_y_continuous("Relative CV-RMSE \n (Difference from KNN-brute)", breaks=seq(-.01,.04,by=.01),limits=c(-0.01,0.04)) +
+  scale_color_manual("Model Type: ", values=RColorBrewer::brewer.pal(4,"Set1")[c(1,2,3)])+
+  scale_shape_manual("Model Type: ", values=c(2,0,1))+
+  scale_linetype_manual("Baseline: ", values=1)+
+  theme(panel.grid.major.x =element_blank(),
+        panel.grid.minor.x =element_blank(),
+        axis.ticks.x = element_blank(),
+        # panel.border = element_blank(),
+        legend.position = "bottom") +
+  annotate(geom="text",x=0,y=0,label="bold(KNN-brute)", color=RColorBrewer::brewer.pal(4,"Set1")[4], parse=T,vjust=-.2,hjust=0.4)
+
+grid.arrange(p3,p4,nrow=2,heights=c(1,1.2))
+```
+
+
+## Classifier Accuracy
+```{r class_accuracy, fig.align='center',fig.width=9.5, fig.height=5.3, out.width='.99\\linewidth', warning=FALSE}
+# Load the Rdata file containing the results_class data frame
+load(file="./tuned_classification_testing.Rdata") 
+ 
+#Setting order of data sets
+iqnn_class_err <- filter(results_class, type=="iqnn") %>% arrange(avg_cv_accuracy)
+iqnn_err_order <- as.character(iqnn_class_err$data_name)
+ 
+# clean data for plots of accuracy relative to knn as baseline
+#   - separate knn from others for "baseline" layers vs "points" layers in plotting
+class_plot_data_knn <- results_class %>%
+  filter(type == "knn - brute") %>%
+  mutate(data_name = factor(data_name,levels=iqnn_err_order),
+         x=as.numeric(data_name)-.5,
+         xend=as.numeric(data_name)+.5)
+class_plot_data_knn$type_pretty <- "KNN-brute"
+
+shiftval=.25 # control the horizontal offset of points on plot
+class_plot_data <- results_class %>%
+  filter(type != "knn - brute") %>%
+  mutate(data_name = factor(data_name,levels=iqnn_err_order),
+         shift = (as.numeric(as.factor(as.character(type)))-2)*shiftval,
+         diff_err_perc = -diff_acc*100)
+class_plot_data$type_pretty <- factor(class_plot_data$type, labels=c("IQNN   ","AKNN-cover ", "AKNN-kd   ")) 
+
+x_label_sizes <- as.numeric(sapply(levels(class_plot_data$data_name), function(x) class_plot_data$obs[class_plot_data$data_name==x][1]))
+my_x_ticks <- paste0(levels(class_plot_data$data_name), "\n n=",x_label_sizes)
+
+# plot relative to KNN
+#   - use vertical lines to partition between datasets
+#   - baseline KNN-brute as flat line segment
+#   - consistently offset points for IWNN and AKNN on X, y=accuracy
+#   - scale / theme to match previous plots
+p1 <- ggplot()+
+  geom_segment(aes(x=x, xend=xend,y=100-avg_cv_accuracy*100,yend=100-avg_cv_accuracy*100, linetype="KNN-brute"),
+               color=RColorBrewer::brewer.pal(4,"Set1")[4], size=.8, data=class_plot_data_knn) +
+  geom_vline(xintercept=seq(0.5,10.5,by=1),linetype=2,color="gray25")+
+  geom_point(aes(x=as.numeric(data_name)+shift,y=100-avg_cv_accuracy*100,color=type_pretty,shape=type_pretty),
+             size=3,data=class_plot_data)+
+  theme_bw() +
+  scale_linetype_manual("Baseline: ", values=1)+
+  scale_x_continuous("", breaks=1:10,
+                     labels=my_x_ticks,
+                     limits=c(0.5,10.5)) +
+  scale_y_continuous("Misclassification Rates\n (units of % error)",
+                     breaks=seq(0,100,by=10),labels=paste0("  ",seq(0,100,by=10),"% ")) +
+  scale_color_manual("Model Type: ", values=RColorBrewer::brewer.pal(4,"Set1")[c(1,2,3)])+
+  scale_shape_manual("Model Type: ", values=c(2,0,1))+
+  theme(panel.grid.major.x =element_blank(),
+        panel.grid.minor.x =element_blank(),
+        axis.ticks.x = element_blank(),
+        # panel.border = element_blank(),
+        legend.position = "none")
+
+
+# plot relative to KNN
+#   - use vertical lines to partition between datasets
+#   - baseline at 0 to represent KNN-brute
+#   - consistently offset points for IWNN and AKNN on X, y=accuracy
+#   - scale / theme to match previous plots
+p2 <- ggplot()+
+  geom_segment(aes(x=.5, xend=10.5,y=0,yend=0, linetype="KNN-brute"),size=.8, color=RColorBrewer::brewer.pal(4,"Set1")[4])+
+  geom_vline(xintercept=seq(0.5,10.5,by=1),linetype=2,color="gray25")+
+  geom_point(aes(x=as.numeric(data_name)+shift,y=diff_err_perc,color=type_pretty,shape=type_pretty),
+             size=3,data=class_plot_data)+
+  theme_bw()+
+  scale_linetype_manual("Baseline: ", values=1)+
+  scale_x_continuous(" ", breaks=1:10,
+                     labels=my_x_ticks,
+                     limits=c(0.5,10.5))+
+  scale_y_continuous("Difference from KNN-brute\n (units of % error)",
+                     breaks=seq(-0.5,1.5,by=.5),labels=c("-0.5%","0.0%","0.5%","1.0%","1.5%"),
+                     limits=c(min(-.5,min(class_plot_data$diff_err_perc)),max(1.5,max(class_plot_data$diff_err_perc)))) +
+  scale_color_manual("Model Type: ", values=RColorBrewer::brewer.pal(4,"Set1")[c(1,2,3)])+
+  scale_shape_manual("Model Type: ", values=c(2,0,1))+
+  # annotate(geom="text",x=0,y=0,label="bold(KNN-brute)", color=RColorBrewer::brewer.pal(4,"Set1")[4], parse=T,vjust=-.2,hjust=0.4)+
+  theme(panel.grid.major.x =element_blank(),
+        panel.grid.minor.x =element_blank(),
+        axis.ticks.x = element_blank(),
+        # panel.border = element_blank(),
+        legend.position = "bottom")
+
+grid.arrange(p1,p2,nrow=2,heights=c(1,1.2))
+```
